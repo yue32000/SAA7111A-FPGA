@@ -13,27 +13,27 @@ reg scl_r;
 //counter of 500
 always @ (posedge clk or negedge rst_n)
 	if(!rst_n) cnt_delay <= 9'd0;
-	else if(cnt_delay == 9'd499) cnt_delay <= 9'd0;	//计数到10us为scl的周期，即100KHz
-	else cnt_delay <= cnt_delay+1'b1;	//时钟计数
+	else if(cnt_delay == 9'd499) cnt_delay <= 9'd0;	
+	else cnt_delay <= cnt_delay+1'b1;	
 //counting four state of SCL
 always @ (posedge clk or negedge rst_n) begin
 	if(!rst_n) cnt <= 3'd5;
 	else begin
 		case (cnt_delay)
-			9'd124:	cnt <= 3'd1;	//cnt=1:scl high高电平中间,用于数据采样
-			9'd249:	cnt <= 3'd2;	//cnt=2:scl negeage下降沿
-			9'd374:	cnt <= 3'd3;	//cnt=3:scl low低电平中间,用于数据变化
-			9'd499:	cnt <= 3'd0;	//cnt=0:scl posedge上升沿
+			9'd124:	cnt <= 3'd1;	//cnt=1:scl high middle point
+			9'd249:	cnt <= 3'd2;	//cnt=2:scl negeage
+			9'd374:	cnt <= 3'd3;	//cnt=3:scl low middle point
+			9'd499:	cnt <= 3'd0;	//cnt=0:scl posedge
 			default: cnt <= 3'd5;
 			endcase
 		end
 end
 
 
-`define SCL_POS		(cnt==3'd0)		//cnt=0:scl posedge上升沿
-`define SCL_HIG		(cnt==3'd1)		//cnt=1:scl high高电平中间,用于数据采样
-`define SCL_NEG		(cnt==3'd2)		//cnt=2:scl negeage下降沿
-`define SCL_LOW		(cnt==3'd3)		//cnt=3:scl low低电平中间,用于数据变化
+`define SCL_POS		(cnt==3'd0)		//cnt=0:scl posedge
+`define SCL_HIG		(cnt==3'd1)		//cnt=1:scl high middle point 
+`define SCL_NEG		(cnt==3'd2)		//cnt=2:scl negeage
+`define SCL_LOW		(cnt==3'd3)		//cnt=3:scl low middle point
 // SCL generator
 always @ (posedge clk or negedge rst_n)
 	if(!rst_n) scl_r <= 1'b0;
