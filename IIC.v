@@ -1,114 +1,104 @@
-  module IIC(
-			clk,rst_n,
-		
-			scl,sda,dir
-		);
-
-input clk;		// 50MHz
-input rst_n;	//复位信号，低有效
-output dir;     //sda方向
-output scl;		// 24C02的时钟端口
-inout sda;		// 24C02的数据端口
-/////////////////////////------------IIC时钟--------------//////////////////////////////////
-reg[2:0] cnt;	// cnt=0:scl上升沿，cnt=1:scl高电平中间，cnt=2:scl下降沿，cnt=3:scl低电平中间
-reg[8:0] cnt_delay;	//500循环计数，产生iic所需要的时钟
-reg scl_r;		//时钟脉冲寄存器
-
+  /*
+  This module defines the IIC bus between SAA7111A and FPGA. The FPGA writes all the commend to SAA7111A.
+  */
+module IIC(clk,rst_n,scl,sda);
+input clk;		// 50MHz input clock
+input rst_n;	//reset signal,module active when low
+output scl;		
+inout sda;		
+/////////////////////////------------IIC CLOCK GENERATOR--------------//////////////////////////////////
+reg[2:0] cnt;	// counting four state of SCL signal 0:posedge 1:high 2:negeage 3:low
+reg[8:0] cnt_delay;	//counter
+reg scl_r;	
+//counter of 500
 always @ (posedge clk or negedge rst_n)
 	if(!rst_n) cnt_delay <= 9'd0;
 	else if(cnt_delay == 9'd499) cnt_delay <= 9'd0;	//计数到10us为scl的周期，即100KHz
 	else cnt_delay <= cnt_delay+1'b1;	//时钟计数
-
+//counting four state of SCL
 always @ (posedge clk or negedge rst_n) begin
 	if(!rst_n) cnt <= 3'd5;
 	else begin
 		case (cnt_delay)
-			9'd124:	cnt <= 3'd1;	//cnt=1:scl高电平中间,用于数据采样
-			9'd249:	cnt <= 3'd2;	//cnt=2:scl下降沿
-			9'd374:	cnt <= 3'd3;	//cnt=3:scl低电平中间,用于数据变化
-			9'd499:	cnt <= 3'd0;	//cnt=0:scl上升沿
+			9'd124:	cnt <= 3'd1;	//cnt=1:scl high高电平中间,用于数据采样
+			9'd249:	cnt <= 3'd2;	//cnt=2:scl negeage下降沿
+			9'd374:	cnt <= 3'd3;	//cnt=3:scl low低电平中间,用于数据变化
+			9'd499:	cnt <= 3'd0;	//cnt=0:scl posedge上升沿
 			default: cnt <= 3'd5;
 			endcase
 		end
 end
 
 
-`define SCL_POS		(cnt==3'd0)		//cnt=0:scl上升沿
-`define SCL_HIG		(cnt==3'd1)		//cnt=1:scl高电平中间,用于数据采样
-`define SCL_NEG		(cnt==3'd2)		//cnt=2:scl下降沿
-`define SCL_LOW		(cnt==3'd3)		//cnt=3:scl低电平中间,用于数据变化
-
+`define SCL_POS		(cnt==3'd0)		//cnt=0:scl posedge上升沿
+`define SCL_HIG		(cnt==3'd1)		//cnt=1:scl high高电平中间,用于数据采样
+`define SCL_NEG		(cnt==3'd2)		//cnt=2:scl negeage下降沿
+`define SCL_LOW		(cnt==3'd3)		//cnt=3:scl low低电平中间,用于数据变化
+// SCL generator
 always @ (posedge clk or negedge rst_n)
 	if(!rst_n) scl_r <= 1'b0;
-	else if(cnt==3'd0) scl_r <= 1'b1;	//scl信号上升沿
-   	else if(cnt==3'd2) scl_r <= 1'b0;	//scl信号下降沿
-
-assign scl = scl_r;	//产生iic所需要的时钟
+	else if(cnt==3'd0) scl_r <= 1'b1;	//scl set to high when posedge comes
+   	else if(cnt==3'd2) scl_r <= 1'b0;	//scl set to low when negeage comes
+	
+assign scl = scl_r;	
 /////////////////////////////////////////////////////////////////////////////
-`define	DEVICE_READ	8'b0100_1001	//被寻址器件地址（读操作）
-`define DEVICE_WRITE	8'b0100_1000	//被寻址器件地址（写操作）
+//
+`define	DEVICE_READ	8'b0100_1001	//read address of SAA7111A
+`define DEVICE_WRITE	8'b0100_1000	//write address of SAA7111A
+`define	WRITE_DATA	8'b0000_0000	//first address to be written in SAA7111A
+reg[7:0] db_r;		//register for data to be sent through IIC
+reg[7:0] sub_address=8'b00000000;//address of registers to be written in SAA7111A
 
-`define	WRITE_DATA	8'b0000_0000	//写入EEPROM的数据
-`define BYTE_ADDR		8'b0000_0000	//写入/读出EEPROM的地址寄存器	
-reg[7:0] db_r;		//在IIC上传送的数据寄存器
-reg[7:0] read_data;	//读出EEPROM的数据寄存器
-reg[7:0] sub_address=8'b00000000;
+//--------------------------------------------
+parameter 	IDLE 	= 4'd0;//initial state
+parameter 	START1= 4'd1;//start signal of transmitting
+parameter 	ADD1 	= 4'd2;//device address
+parameter 	ACK1 	= 4'd3;//acknowlegement
+parameter 	ADD2 	= 4'd4;//subaddress1
+parameter 	ACK2 	= 4'd5;//acknowlegement
+parameter 	DATA 	= 4'd6;//data transmiting
+parameter 	ACK3	= 4'd7;//acknowlegement
+parameter 	STOP1 	= 4'd8;//stop signal of transmitting
+parameter 	STOP2 	= 4'd9;//
 
-//---------------------------------------------
-		//读、写时序
-parameter 	IDLE 	= 4'd0;
-parameter 	START1 	= 4'd1;
-parameter 	ADD1 	= 4'd2;
-parameter 	ACK1 	= 4'd3;
-parameter 	ADD2 	= 4'd4;
-parameter 	ACK2 	= 4'd5;
-parameter 	START2 	= 4'd6;
-parameter 	ADD3 	= 4'd7;
-parameter 	ACK3	= 4'd8;
-parameter 	DATA 	= 4'd9;
-parameter 	ACK4	= 4'd10;
-parameter 	STOP1 	= 4'd11;
-parameter 	STOP2 	= 4'd12;
-
-reg[3:0] cstate;	//状态寄存器
-reg sda_r;		//输出数据寄存器
-reg dir;	//输出数据sda信号inout方向控制位		
-reg[3:0] num;	//
-
+reg[3:0] cstate;	//state register
+reg sda_r;		   //sda register 
+reg dir;	         //sda direction indicator		
+reg[3:0] num;	   //number of bit to be sent
+//IIC bus timing for writing DATA to SAA7111A subaddresses
 always @ (posedge clk or negedge rst_n) begin
 	if(!rst_n) begin
 			cstate <= IDLE;
 			sda_r <= 1'b1;
 			dir <= 1'b0;
 			num <= 4'd0;
-			read_data <= 8'b0000_0000;
 		end
 	else 	  
 		case (cstate)
 			IDLE:	begin
-					dir <= 1'b1;			//数据线sda为output
+					dir <= 1'b1;			
 					sda_r <= 1'b1;
 							
-						db_r <= `DEVICE_WRITE;	//送器件地址（写操作）
+						db_r <= `DEVICE_WRITE;	
 						cstate <= START1;		
 						
 					
 				end
 			START1: begin
-					if(`SCL_HIG) begin		//scl为高电平期间
-						dir <= 1'b1;	//数据线sda为output
-						sda_r <= 1'b0;		//拉低数据线sda，产生起始位信号
+					if(`SCL_HIG) begin		
+						dir <= 1'b1;	
+						sda_r <= 1'b0;		
 						cstate <= ADD1;
-						num <= 4'd0;		//num计数清零
+						num <= 4'd0;		
 						end
-					else cstate <= START1; //等待scl高电平中间位置到来
+					else cstate <= START1; 
 				end
 			ADD1:	begin
 					if(`SCL_LOW) begin
 							if(num == 4'd8) begin	
-									num <= 4'd0;			//num计数清零
+									num <= 4'd0;			
 									sda_r <= 1'b1;
-									dir <= 1'b0;		//sda置为高阻态(input)
+									dir <= 1'b0;		
 									cstate <= ACK1;
 								end
 							else begin
@@ -125,29 +115,29 @@ always @ (posedge clk or negedge rst_n) begin
 										4'd7: sda_r <= db_r[0];
 										default: ;
 										endcase
-							//		sda_r <= db_r[4'd7-num];	//送器件地址，从高位开始
+							
 								end
 						end
-			//		else if(`SCL_POS) db_r <= {db_r[6:0],1'b0};	//器件地址左移1bit
+			
 					else cstate <= ADD1;
 				end
 			ACK1:	begin
-					if(/*!sda*/`SCL_NEG) begin	//注：24C01/02/04/08/16器件可以不考虑应答位
-							cstate <= ADD2;	//从机响应信号
-							db_r <= 8'h00;	// 1地址		
+					if(/*!sda*/`SCL_NEG) begin	
+							cstate <= ADD2;	
+							db_r <= 8'h00;		
 						end
-					else cstate <= ACK1;		//等待从机响应
+					else cstate <= ACK1;		
 				end
 			ADD2:	begin
 					if(`SCL_LOW) begin
 							if(num==4'd8) begin	
-									num <= 4'd0;			//num计数清零
+									num <= 4'd0;			
 									sda_r <= 1'b1;
-									dir <= 1'b0;		//sda置为高阻态(input)
+									dir <= 1'b0;		
 									cstate <= ACK2;
 								end
 							else begin
-									dir <= 1'b1;		//sda作为output
+									dir <= 1'b1;		
 									num <= num+1'b1;
 									case (num)
 										4'd0: sda_r <= db_r[7];
@@ -160,33 +150,28 @@ always @ (posedge clk or negedge rst_n) begin
 										4'd7: sda_r <= db_r[0];
 										default: ;
 										endcase
-							//		sda_r <= db_r[4'd7-num];	//送EEPROM地址（高bit开始）		
 									cstate <= ADD2;					
 								end
 						end
-			//		else if(`SCL_POS) db_r <= {db_r[6:0],1'b0};	//器件地址左移1bit
 					else cstate <= ADD2;				
 				end
 			ACK2:	begin
-					if(/*!sda*/`SCL_NEG) begin		//从机响应信号
+					if(/*!sda*/`SCL_NEG) begin		
 						
-								cstate <= DATA; 	//写操作
-								db_r<=8'h10;			//写入的数据			
-								
-
-					
+								cstate <= DATA; 	
+								db_r<=8'h10;	//written data	
 						end
-					else cstate <= ACK2;	//等待从机响应
+					else cstate <= ACK2;	
 				end
 			
 			
 			DATA:	begin
-					//写操作
+					//write
 							dir <= 1'b1;	
 							if(num<=4'd7) begin
 								cstate <= DATA;
 								if(`SCL_LOW) begin
-									dir <= 1'b1;		//数据线sda作为output
+									dir <= 1'b1;		
 									num <= num+1'b1;
 									case (num)
 										4'd0: sda_r <= db_r[7];
@@ -198,27 +183,25 @@ always @ (posedge clk or negedge rst_n) begin
 										4'd6: sda_r <= db_r[1];
 										4'd7: sda_r <= db_r[0];
 										default: ;
-										endcase									
-								//	sda_r <= db_r[4'd7-num];	//写入数据（高bit开始）
-									end
-			//					else if(`SCL_POS) db_r <= {db_r[6:0],1'b0};	//写入数据左移1bit
+										endcase																	
+									end	
 							 	end
 							else if((`SCL_LOW) && (num==4'd8)) begin
 									num <= 4'd0;
 									sda_r <= 1'b1;
-									dir <= 1'b0;		//sda置为高阻态
-									cstate <= ACK4;
+									dir <= 1'b0;		
+									cstate <= ACK3;
 								end
 							else cstate <= DATA;
 						
 				end
-			ACK4: begin
+			ACK3: begin
 					if(/*!sda*/`SCL_NEG) begin
 //						sda_r <= 1'b1;
-   case(sub_address)
-	8'h00:
+case(sub_address)
+   8'h00:
 	          begin 
-	         sub_address<=8'h01;
+	          sub_address<=8'h01;
 				 db_r <=8'b00000000; 
 				 cstate <= DATA;
 	          end
@@ -365,7 +348,7 @@ always @ (posedge clk or negedge rst_n) begin
 	endcase
 												
 						end
-					else cstate <= ACK4;
+					else cstate <= ACK3;
 				end
 			STOP1:	begin
 					if(`SCL_LOW) begin
@@ -375,7 +358,7 @@ always @ (posedge clk or negedge rst_n) begin
 							cstate <= STOP1;
 						end
 					else if(`SCL_HIG) begin
-							sda_r <= 1'b1;	//scl为高时，sda产生上升沿（结束信号）
+							sda_r <= 1'b1;	//when scl is HIGH, pull to SDA to HIGH to give an end signal.
 							cstate<=STOP2;
 						end
 					else cstate <= STOP1;
@@ -385,7 +368,8 @@ always @ (posedge clk or negedge rst_n) begin
 					begin 
 					sda_r <= 1'b1;
 			      
-					 cstate <= IDLE;
+					 cstate <= STOP2;
+					 //cstate<= IDLE;
 					 end
 				end
 			default: cstate <= IDLE;
@@ -393,10 +377,6 @@ always @ (posedge clk or negedge rst_n) begin
 end
 
 assign sda = dir ? sda_r:1'bz;
-
-
-
-
 endmodule
 
 
